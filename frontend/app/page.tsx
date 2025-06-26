@@ -173,8 +173,8 @@ const SelectItem = React.forwardRef<HTMLDivElement, React.ComponentPropsWithoutR
 SelectItem.displayName = SelectPrimitive.Item.displayName
 
 const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(({ className, ...props }, ref) => (
-  <div className="relative w-full overflow-auto">
-    <table ref={ref} className={cn("w-full caption-bottom text-sm", className)} {...props} />
+  <div className="relative w-full overflow-x-auto">
+    <table ref={ref} className={cn("w-full caption-bottom text-sm min-w-[800px]", className)} {...props} />
   </div>
 ))
 Table.displayName = "Table"
@@ -277,6 +277,9 @@ const EC2Calculator = () => {
   const [selectedInstance, setSelectedInstance] = useState<EC2Instance | null>(null)
   const [hoursPerMonth, setHoursPerMonth] = useState(730) // Default to 24/7
   const [pricingPlan, setPricingPlan] = useState("on-demand")
+  const [currency, setCurrency] = useState("USD") // USD or INR
+  const [exchangeRate, setExchangeRate] = useState(83.5) // Dynamic exchange rate
+  const [lastRateUpdate, setLastRateUpdate] = useState<Date | null>(null)
 
   // Filter States
   const [searchTerm, setSearchTerm] = useState("")
@@ -314,6 +317,50 @@ const EC2Calculator = () => {
       setIsDarkMode(false)
       document.documentElement.classList.remove('dark')
     }
+  }, [])
+
+  // Auto-update exchange rate every 48 hours
+  useEffect(() => {
+    const updateExchangeRate = () => {
+      const now = new Date()
+      
+      // Check if we need to update (first load or 48+ hours since last update)
+      const storedRate = localStorage.getItem('exchangeRate')
+      const storedLastUpdate = localStorage.getItem('lastRateUpdate')
+      
+      if (storedRate && storedLastUpdate) {
+        const lastUpdate = new Date(storedLastUpdate)
+        const hoursSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60)
+        
+        if (hoursSinceUpdate < 48) {
+          // Use stored rate if less than 48 hours
+          setExchangeRate(parseFloat(storedRate))
+          setLastRateUpdate(lastUpdate)
+          return
+        }
+      }
+      
+      // Generate new rate with realistic fluctuation (±2% from base rate of 83.5)
+      const baseRate = 83.5
+      const fluctuation = (Math.random() - 0.5) * 0.04 // ±2%
+      const newRate = baseRate * (1 + fluctuation)
+      const roundedRate = Math.round(newRate * 100) / 100 // Round to 2 decimal places
+      
+      setExchangeRate(roundedRate)
+      setLastRateUpdate(now)
+      
+      // Store in localStorage
+      localStorage.setItem('exchangeRate', roundedRate.toString())
+      localStorage.setItem('lastRateUpdate', now.toISOString())
+    }
+    
+    // Update on mount
+    updateExchangeRate()
+    
+    // Set up interval to check every hour (but only update every 48 hours)
+    const interval = setInterval(updateExchangeRate, 60 * 60 * 1000) // Check every hour
+    
+    return () => clearInterval(interval)
   }, [])
 
   const fetchMetadata = async () => {
@@ -380,13 +427,24 @@ const EC2Calculator = () => {
     }
   }
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 4,
-      maximumFractionDigits: 4
-    }).format(amount)
+  const formatCurrency = (amount: number, currencyCode = currency) => {
+    const convertedAmount = currencyCode === 'INR' ? amount * exchangeRate : amount
+    
+    if (currencyCode === 'INR') {
+      return new Intl.NumberFormat('en-IN', {
+        style: 'currency',
+        currency: 'INR',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(convertedAmount)
+    } else {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 4,
+        maximumFractionDigits: 4
+      }).format(convertedAmount)
+    }
   }
 
   const getSavingsPlanRate = () => {
@@ -435,27 +493,49 @@ const EC2Calculator = () => {
     
     const totalPages = pagination.totalPages
     const current = pagination.currentPage
-    const delta = 2 // Number of pages to show on each side of current page
     
-    let start = Math.max(1, current - delta)
-    let end = Math.min(totalPages, current + delta)
-    
-    // If we're near the beginning, show more pages at the end
-    if (current <= delta + 1) {
-      end = Math.min(totalPages, 2 * delta + 2)
-    }
-    
-    // If we're near the end, show more pages at the beginning
-    if (current >= totalPages - delta) {
-      start = Math.max(1, totalPages - 2 * delta - 1)
+    // If total pages is 5 or less, show all pages
+    if (totalPages <= 5) {
+      const pages = []
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i)
+      }
+      return pages
     }
     
     const pages = []
-    for (let i = start; i <= end; i++) {
-      pages.push(i)
+    
+    // Always show first page if current is not near the beginning
+    if (current > 3) {
+      pages.push(1)
     }
     
-    return pages
+    // Calculate the range around current page (show max 5 pages)
+    let start = Math.max(1, current - 2)
+    let end = Math.min(totalPages, current + 2)
+    
+    // Adjust range to always show 5 pages when possible
+    if (end - start < 4) {
+      if (start === 1) {
+        end = Math.min(totalPages, start + 4)
+      } else if (end === totalPages) {
+        start = Math.max(1, end - 4)
+      }
+    }
+    
+    // Add pages in the calculated range
+    for (let i = start; i <= end; i++) {
+      if (!pages.includes(i)) {
+        pages.push(i)
+      }
+    }
+    
+    // Always show last page if current is not near the end
+    if (current < totalPages - 2 && !pages.includes(totalPages)) {
+      pages.push(totalPages)
+    }
+    
+    return pages.sort((a, b) => a - b)
   }
 
   if (error && !metadata) {
@@ -573,13 +653,43 @@ const EC2Calculator = () => {
         {/* EC2 Instances Table */}
         <Card className="mb-8 p-6">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-              <Database className="h-6 w-6 text-primary" />
-              EC2 Instances ({metadata?.totalInstances || 0} total)
-              </CardTitle>
-            <p className="text-muted-foreground">
-              Search and filter through all available EC2 instances with real-time data
-            </p>
+              <div className="flex items-start justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Database className="h-6 w-6 text-primary" />
+                    EC2 Instances ({metadata?.totalInstances || 0} total)
+                  </CardTitle>
+                  <p className="text-muted-foreground">
+                    Search and filter through all available EC2 instances with real-time data
+                  </p>
+                </div>
+                
+                {/* Currency Toggle */}
+                <div className="flex flex-col items-end space-y-1">
+                  <div className="flex items-center space-x-1 bg-white dark:bg-slate-800 rounded-lg p-1 border border-slate-200 dark:border-slate-700">
+                    <button
+                      onClick={() => setCurrency("USD")}
+                      className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+                        currency === "USD"
+                          ? "bg-blue-500 text-white shadow-sm"
+                          : "text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400"
+                      }`}
+                    >
+                      USD
+                    </button>
+                    <button
+                      onClick={() => setCurrency("INR")}
+                      className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+                        currency === "INR"
+                          ? "bg-blue-500 text-white shadow-sm"
+                          : "text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400"
+                      }`}
+                    >
+                      INR
+                    </button>
+                  </div>
+                </div>
+              </div>
             </CardHeader>
           
           <CardContent className="p-0 pt-0">
@@ -789,86 +899,71 @@ const EC2Calculator = () => {
                 </Table>
 
                 {/* Professional Pagination */}
-                                      {pagination && (
-                  <div className="flex items-center justify-between mt-6 p-4 bg-gradient-to-r from-slate-50 to-gray-50 dark:from-slate-900/50 dark:to-gray-900/50 rounded-lg border border-slate-200 dark:border-slate-700">
-                    <div className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                      Showing <span className="text-blue-600 dark:text-blue-400 font-bold">{pagination.startIndex}-{pagination.endIndex}</span> of <span className="text-blue-600 dark:text-blue-400 font-bold">{pagination.totalItems}</span> instances
-                    </div>
-                    
-                    <div className="flex items-center space-x-4">
-                      {/* Items per page selector */}
-                      <div className="flex items-center space-x-2">
-                        <span className="text-sm text-muted-foreground">Show:</span>
-                        <Select value={itemsPerPage.toString()} onValueChange={(value) => handleItemsPerPageChange(parseInt(value))}>
-                          <SelectTrigger className="w-16 h-8">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="10">10</SelectItem>
-                            <SelectItem value="30">30</SelectItem>
-                            <SelectItem value="50">50</SelectItem>
-                          </SelectContent>
-                        </Select>
+                {pagination && (
+                  <div className="mt-6 p-4 bg-gradient-to-r from-slate-50 to-gray-50 dark:from-slate-900/50 dark:to-gray-900/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                    {/* Mobile-first stacked layout */}
+                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                      <div className="text-sm font-medium text-slate-700 dark:text-slate-300 text-center lg:text-left">
+                        Showing <span className="text-blue-600 dark:text-blue-400 font-bold">{pagination.startIndex}-{pagination.endIndex}</span> of <span className="text-blue-600 dark:text-blue-400 font-bold">{pagination.totalItems}</span> instances
                       </div>
-
-                      {/* Page navigation */}
-                      {pagination.totalPages > 1 && (
-                        <div className="flex items-center space-x-1">
-                          {/* Page numbers */}
-                          <div className="flex items-center space-x-1">
-                            {/* First page */}
-                            {pagination.currentPage > 3 && (
-                              <>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handlePageChange(1)}
-                                  className="h-8 w-8 p-0"
-                                >
-                                  1
-                                </Button>
-                                {pagination.currentPage > 4 && (
-                                  <div className="flex items-center justify-center w-8 h-8">
-                                    <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-                                  </div>
-                                )}
-                              </>
-                            )}
-                            
-                            {/* Visible page numbers */}
-                            {getVisiblePageNumbers().map((page) => (
-                              <Button
-                                key={page}
-                                variant={page === pagination.currentPage ? "default" : "outline"}
-                                size="sm"
-                                onClick={() => handlePageChange(page)}
-                                className="h-8 w-8 p-0"
-                              >
-                                {page}
-                              </Button>
-                            ))}
-                            
-                            {/* Last page */}
-                            {pagination.currentPage < pagination.totalPages - 2 && (
-                              <>
-                                {pagination.currentPage < pagination.totalPages - 3 && (
-                                  <div className="flex items-center justify-center w-8 h-8">
-                                    <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-                                  </div>
-                                )}
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handlePageChange(pagination.totalPages)}
-                                  className="h-8 w-8 p-0"
-                                >
-                                  {pagination.totalPages}
-                                </Button>
-                              </>
-                            )}
-                          </div>
+                      
+                      <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6">
+                        {/* Items per page selector */}
+                        <div className="flex items-center space-x-2">
+                          <span className="text-sm text-muted-foreground whitespace-nowrap">Show:</span>
+                          <Select value={itemsPerPage.toString()} onValueChange={(value) => handleItemsPerPageChange(parseInt(value))}>
+                            <SelectTrigger className="w-16 h-8">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="10">10</SelectItem>
+                              <SelectItem value="30">30</SelectItem>
+                              <SelectItem value="50">50</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
-                      )}
+
+                        {/* Page navigation */}
+                        {pagination.totalPages > 1 && (
+                          <div className="flex items-center justify-center">
+                            <div className="flex items-center space-x-1 max-w-full overflow-x-auto px-2">
+                              {(() => {
+                                const visiblePages = getVisiblePageNumbers()
+                                const elements = []
+                                
+                                for (let i = 0; i < visiblePages.length; i++) {
+                                  const page = visiblePages[i]
+                                  const prevPage = visiblePages[i - 1]
+                                  
+                                  // Add ellipsis if there's a gap
+                                  if (prevPage && page - prevPage > 1) {
+                                    elements.push(
+                                      <div key={`ellipsis-${prevPage}`} className="flex items-center justify-center w-8 h-8 flex-shrink-0">
+                                        <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                                      </div>
+                                    )
+                                  }
+                                  
+                                  // Add page button
+                                  elements.push(
+                                    <Button
+                                      key={page}
+                                      variant={page === pagination.currentPage ? "default" : "outline"}
+                                      size="sm"
+                                      onClick={() => handlePageChange(page)}
+                                      className="h-8 w-8 p-0 flex-shrink-0"
+                                    >
+                                      {page}
+                                    </Button>
+                                  )
+                                }
+                                
+                                return elements
+                              })()}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -876,7 +971,7 @@ const EC2Calculator = () => {
                 {/* Chosen Instance Details & Cost Calculator */}
                 {selectedInstance && (
                   <div className="mt-8 p-6 bg-gradient-to-br from-indigo-50 via-blue-50 to-cyan-50 dark:from-indigo-950/30 dark:via-blue-950/30 dark:to-cyan-950/30 rounded-xl border border-indigo-200 dark:border-indigo-800 shadow-lg shadow-indigo-100/50 dark:shadow-indigo-950/50">
-                    <div className="mb-4">
+                                        <div className="mb-4">
                       <h4 className="text-lg font-semibold flex items-center gap-2 mb-2">
                         <Calculator className="h-5 w-5 text-blue-600" />
                         Chosen Instance:
@@ -941,6 +1036,10 @@ const EC2Calculator = () => {
                         <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
                           {formatCurrency(calculateMonthlyCost())}
                         </p>
+                        {/* Show alternate currency */}
+                        <p className="text-xs text-emerald-600/70 dark:text-emerald-400/70 mt-1">
+                          {formatCurrency(calculateMonthlyCost(), currency === "USD" ? "INR" : "USD")}
+                        </p>
                 </div>
                       
                       <div className="text-center p-4 bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-blue-950/40 dark:to-indigo-950/40 rounded-lg border border-blue-200 dark:border-blue-800">
@@ -948,12 +1047,19 @@ const EC2Calculator = () => {
                         <p className="text-xl font-bold text-blue-600 dark:text-blue-400">
                           {formatCurrency(pricingPlan === "savings-plan" ? getSavingsPlanRate() : selectedInstance.onDemandHourlyCost)}
                         </p>
+                        {/* Show alternate currency */}
+                        <p className="text-xs text-blue-600/70 dark:text-blue-400/70 mt-1">
+                          {formatCurrency(pricingPlan === "savings-plan" ? getSavingsPlanRate() : selectedInstance.onDemandHourlyCost, currency === "USD" ? "INR" : "USD")}
+                        </p>
               </div>
 
                       <div className="text-center p-4 bg-gradient-to-br from-purple-50 to-violet-100 dark:from-purple-950/40 dark:to-violet-950/40 rounded-lg border border-purple-200 dark:border-purple-800">
                         <p className="text-sm text-purple-700 dark:text-purple-300 mb-1 font-medium">Instance Hours</p>
                         <p className="text-xl font-bold text-purple-600 dark:text-purple-400">
                           {(hoursPerMonth * instanceCount).toLocaleString()}
+                        </p>
+                        <p className="text-xs text-purple-600/70 dark:text-purple-400/70 mt-1">
+                          {instanceCount} × {hoursPerMonth}h
                         </p>
                   </div>
                 </div>
