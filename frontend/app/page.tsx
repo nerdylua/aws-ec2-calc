@@ -279,7 +279,6 @@ const EC2Calculator = () => {
   const [pricingPlan, setPricingPlan] = useState("on-demand")
   const [currency, setCurrency] = useState("USD") // USD or INR
   const [exchangeRate, setExchangeRate] = useState(83.5) // Dynamic exchange rate
-  const [lastRateUpdate, setLastRateUpdate] = useState<Date | null>(null)
 
   // Filter States
   const [searchTerm, setSearchTerm] = useState("")
@@ -335,7 +334,6 @@ const EC2Calculator = () => {
         if (hoursSinceUpdate < 48) {
           // Use stored rate if less than 48 hours
           setExchangeRate(parseFloat(storedRate))
-          setLastRateUpdate(lastUpdate)
           return
         }
       }
@@ -347,7 +345,6 @@ const EC2Calculator = () => {
       const roundedRate = Math.round(newRate * 100) / 100 // Round to 2 decimal places
       
       setExchangeRate(roundedRate)
-      setLastRateUpdate(now)
       
       // Store in localStorage
       localStorage.setItem('exchangeRate', roundedRate.toString())
