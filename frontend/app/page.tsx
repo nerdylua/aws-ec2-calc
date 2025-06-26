@@ -467,9 +467,6 @@ const EC2Calculator = () => {
           </CardHeader>
           <CardContent>
             <p className="text-muted-foreground mb-4">{error}</p>
-            <p className="text-sm text-muted-foreground mb-4">
-              Make sure the backend server is running on port 3001.
-            </p>
             <Button onClick={() => window.location.reload()}>
               Retry Connection
             </Button>
