@@ -1,70 +1,40 @@
-const metadataHandler = require('./metadata');
-const instancesHandler = require('./instances');
-const pricingPlansHandler = require('./pricing-plans');
-const calculateHandler = require('./calculate');
+const metadataHandler      = require('./metadata');
+const instancesHandler     = require('./instances');
 const filterOptionsHandler = require('./filter-options');
-const refreshDataHandler = require('./refresh-data');
-const healthHandler = require('./health');
+const refreshDataHandler   = require('./refresh-data');
+const healthHandler        = require('./health');
 
-module.exports = (req, res) => {
-  // Set CORS headers for all requests
+module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
 
-  // Route based on URL path
-  const path = req.url || '';
-  
-  if (path.startsWith('/api/metadata')) {
-    return metadataHandler(req, res);
-  }
-  
-  if (path.startsWith('/api/instances')) {
-    return instancesHandler(req, res);
-  }
-  
-  if (path.startsWith('/api/pricing-plans')) {
-    return pricingPlansHandler(req, res);
-  }
-  
-  if (path.startsWith('/api/calculate')) {
-    return calculateHandler(req, res);
-  }
-  
-  if (path.startsWith('/api/filter-options')) {
-    return filterOptionsHandler(req, res);
-  }
-  
-  if (path.startsWith('/api/refresh-data')) {
-    return refreshDataHandler(req, res);
-  }
-  
-  if (path.startsWith('/api/health')) {
-    return healthHandler(req, res);
-  }
-  
-  // API info endpoint
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  const { pathname } = new URL(req.url, 'http://localhost');
+  const path = pathname.replace(/\/+$/, '');       // trim trailing slash
+
+  if (path === '/api/metadata')       return await metadataHandler(req, res);
+  if (path === '/api/instances')      return await instancesHandler(req, res);
+  if (path === '/api/filter-options') return await filterOptionsHandler(req, res);
+  if (path === '/api/refresh-data')   return await refreshDataHandler(req, res);
+  if (path === '/api/health')         return await healthHandler(req, res);
+
   if (path === '/api') {
-    return res.status(200).json({ 
-      status: 'ok', 
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(200).json({
+      status: 'ok',
       message: 'AWS EC2 Cost Calculator API',
       endpoints: [
         '/api/metadata',
         '/api/instances',
-        '/api/pricing-plans',
-        '/api/calculate',
         '/api/filter-options',
         '/api/refresh-data',
         '/api/health'
       ]
     });
   }
-  
-  // 404 for unknown routes
+
+  res.setHeader('Content-Type', 'application/json');
   res.status(404).json({ error: 'Endpoint not found' });
-}; 
+};
